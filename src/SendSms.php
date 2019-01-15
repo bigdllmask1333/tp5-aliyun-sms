@@ -9,7 +9,6 @@
 namespace xuezhitech\aliyunsms;
 
 use think\facade\Cache;
-use think\facade\Log;
 use xuezhitech\aliyunsms\SignatureHelper;
 
 class SendSms
@@ -20,15 +19,12 @@ class SendSms
         'security'          => false,
         'domain'            => 'dysmsapi.aliyuncs.com',
         'security'          => false,
-        'expire'            => 60
-    ];
-    protected $params = [
+        'expire'            => 60,
+        'SignName'          => '',
+        'TemplateCode'      => '',
         'RegionId'          => 'cn-hangzhou',
         'Action'            => 'SendSms',
         'Version'           => '2017-05-25',
-        'PhoneNumbers'      => '',
-        'SignName'          => '',
-        'TemplateCode'      => '',
     ];
 
     protected $result = [
@@ -36,73 +32,104 @@ class SendSms
         'msg'=>''
     ];
 
-    public function __construct( $config=[],$params=[] ){
+    public function __construct( $config=[] ){
         $this->config = array_merge($this->config,$config);
-        $this->params = array_merge($this->params,$params);
     }
 
     //发短信
-    public function sendSms( $params=[] ){
-        $this->params = array_merge($this->params,$params);
+    public function sendSms( $phone ){
+
+        $params = [];
+
         //配置是否已设置
         if ( !$this->checkConfig() ){
-            $this->result['msg'] = 'accessKeyId或accessKeySecret 不能为空';
             return  $this->result;
         }
         //参数是否已设置
-        if ( !$this->checkParams() ){
-            $this->result['msg'] = 'PhoneNumbers(手机号)/SignName(短信签名)/TemplateCode(短信模板Code) 不能为空';
+        if ( empty($phone) ){
+            $this->result['status'] = false;
+            $this->result['msg'] = 'PhoneNumbers(手机号)不能为空';
             return  $this->result;
         }
         //手机是否已发送过
-        if ( !$this->check() ) {
+        if ( $this->check($phone) ) {
+            $this->result['status'] = false;
             $this->result['msg'] = '该手机号已发送过短信';
             return  $this->result;
         }
+        $params['TemplateParam'] = ["code" => $this->getRandomString(6)];
+        if(!empty($params["TemplateParam"]) && is_array($params["TemplateParam"])) {
+            $params["TemplateParam"] = json_encode($params["TemplateParam"], JSON_UNESCAPED_UNICODE);
+        }
+        //拼params
+        $params['PhoneNumbers'] = $phone;
+        $params['SignName'] = $this->config['SignName'];
+        $params['TemplateCode'] = $this->config['TemplateCode'];
+        $params['RegionId'] = $this->config['RegionId'];
+        $params['Action'] = $this->config['Action'];
+        $params['Version'] = $this->config['Version'];
+
         $helper = new SignatureHelper();
         //此处可能会抛出异常，注意catch
         $content = $helper->request(
             $this->config['accessKeyId'],$this->config['accessKeySecret'],
             $this->config['domain'],
-            $this->params,
+            $params,
             $this->config['security']
         );
+
         if ( !$content ){
+            $this->result['status'] = false;
             $this->result['msg'] = '短信发送失败';
             return  $this->result;
         }
+
         //缓存 1分钟
-        $this->setCache();
+        $this->setCache($phone);
 
         $this->result['msg']        = $content;
         $this->result['status']     = true;
 
         return $this->result;
     }
+
+    private function getRandomString($len, $chars = null)
+    {
+        if (is_null($chars)) {
+            $chars = "0123456789";
+        }
+        mt_srand(10000000 * (double)microtime());
+        for ($i = 0, $str = '', $lc = strlen($chars) - 1; $i < $len; $i++) {
+            $str .= $chars[mt_rand(0, $lc)];
+        }
+        return $str;
+    }
+
     //check
-    private function check(){
-        $key = 'sms_'.$this->params['PhoneNumbers'];
-        $phone = Cache::get($key);
-        if ( !empty($phone) ){
+    private function check($phone){
+        $key = 'sms_'.$phone;
+        $is_send = Cache::get($key);
+        if ( $is_send ){
+            return true;
+        }else{
             return false;
         }
     }
-    private function setCache(){
-        $key = 'sms_'.$this->params['PhoneNumbers'];
-        Cache::set($key,$this->params['PhoneNumbers'],$this->config['expire']);
+
+    private function setCache($phone){
+        $key = 'sms_'.$phone;
+        Cache::set($key,$phone,$this->config['expire']);
     }
+
     private function checkConfig(){
-        if ( empty($this->config['accessKeyId']) || empty($this->config['accessKeySecret'])){
-            Log::write('参数accessKeyId或accessKeySecret为空！');
-            return false;
+        $this->result['status'] = true;
+        foreach ( $this->config as $key=>$value){
+            if ( !isset($value) ){
+                $this->result['msg'] = "{$key}不能为空!";
+                $this->result['status'] = false;
+                break;
+            }
         }
-        return true;
-    }
-    private function checkParams(){
-        if ( empty($this->params['PhoneNumbers']) || empty($this->params['SignName']) || empty($this->params['TemplateCode'])){
-            Log::write('参数PhoneNumbers或SignName或TemplateCode为空！');
-            return false;
-        }
-        return true;
+        return $this->result['status'];
     }
 }

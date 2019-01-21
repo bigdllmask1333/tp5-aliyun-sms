@@ -36,6 +36,17 @@ class SendSms
         $this->config = array_merge($this->config,$config);
     }
 
+    //验证短信是否正确
+    public function check( $phone,$sms_code ){
+        $key = 'sms_'.$phone;
+        $is_send = Cache::get($key);
+        if ( $is_send && $is_send==$sms_code ){
+            return true;
+        }else{
+            return false;
+        }
+    }
+
     //发短信
     public function sendSms( $phone ){
 
@@ -52,12 +63,13 @@ class SendSms
             return  $this->result;
         }
         //手机是否已发送过
-        if ( $this->check($phone) ) {
+        if ( $this->is_send($phone) ) {
             $this->result['status'] = false;
             $this->result['msg'] = '该手机号已发送过短信';
             return  $this->result;
         }
-        $params['TemplateParam'] = ["code" => $this->getRandomString(6)];
+        $sms_code = $this->getRandomString(6);
+        $params['TemplateParam'] = ["code"=>$sms_code];
         if(!empty($params["TemplateParam"]) && is_array($params["TemplateParam"])) {
             $params["TemplateParam"] = json_encode($params["TemplateParam"], JSON_UNESCAPED_UNICODE);
         }
@@ -85,7 +97,7 @@ class SendSms
         }
 
         //缓存 1分钟
-        $this->setCache($phone);
+        $this->setCache($phone,$sms_code);
 
         $this->result['msg']        = $content;
         $this->result['status']     = true;
@@ -106,7 +118,7 @@ class SendSms
     }
 
     //check
-    private function check($phone){
+    private function is_send($phone){
         $key = 'sms_'.$phone;
         $is_send = Cache::get($key);
         if ( $is_send ){
@@ -116,9 +128,9 @@ class SendSms
         }
     }
 
-    private function setCache($phone){
+    private function setCache($phone,$sms_code){
         $key = 'sms_'.$phone;
-        Cache::set($key,$phone,$this->config['expire']);
+        Cache::set($key,$sms_code,$this->config['expire']);
     }
 
     private function checkConfig(){
